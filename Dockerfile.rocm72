@@ -47,10 +47,15 @@ FROM public.ecr.aws/docker/library/ubuntu:24.04
 
 # Install runtime dependencies
 # libvulkan1 and libopenblas0 are generally useful for inference or fallbacks.
-RUN apt-get update && apt-get install -y ca-certificates libgomp1 libvulkan1 libopenblas0 && rm -rf /var/lib/apt/lists/*
+# libnuma1 and libelf1 are often required for ROCm runtime.
+RUN apt-get update && apt-get install -y ca-certificates libgomp1 libvulkan1 libopenblas0 libnuma1 libelf1 libdrm2 libdrm-amdgpu1 && rm -rf /var/lib/apt/lists/*
 
 # Copy binary
 COPY --from=builder /bin/ollama /usr/bin/ollama
+
+# Copy ROCm tools for debugging and detection
+COPY --from=builder /opt/rocm/bin/rocminfo /usr/bin/rocminfo
+COPY --from=builder /opt/rocm/bin/rocm-smi /usr/bin/rocm-smi
 
 # Copy libraries
 # The install step puts runner and libs in dist/lib/ollama/rocm
