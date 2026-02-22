@@ -2,11 +2,15 @@
 
 ARG ROCM_VERSION=7.2
 ARG CMAKE_VERSION=3.31.2
+ARG VULKANVERSION=1.4.321.1
+ARG PARALLEL=16
 
 # ----------------------------------------------------------------------------
 # Base builder with CMake and Go
 # ----------------------------------------------------------------------------
 FROM rocm/dev-almalinux-8:${ROCM_VERSION}-complete AS base-builder
+
+ARG PARALLEL
 
 # Install build dependencies
 RUN yum install -y yum-utils \
@@ -37,6 +41,7 @@ RUN go build -trimpath -buildmode=pie -o /bin/ollama .
 # ----------------------------------------------------------------------------
 FROM base-builder AS rocm-builder
 
+ARG PARALLEL
 ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
 
 # Build ROCm runner targeting gfx1151
@@ -44,8 +49,8 @@ ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
 RUN cmake --preset "ROCm 7" \
     -DAMDGPU_TARGETS="gfx1151" \
     -DCMAKE_HIP_FLAGS="-parallel-jobs=4" \
-    && cmake --build --parallel 8 --preset "ROCm 7" \
-    && cmake --install build --component HIP --strip --parallel 8
+    && cmake --build --parallel ${PARALLEL} --preset "ROCm 7" \
+    && cmake --install build --component HIP --strip --parallel ${PARALLEL}
 
 # Prune rocblas library to keep only gfx1151
 RUN find dist/lib/ollama/rocm/rocblas/library -name "*gfx*" ! -name "*gfx1151*" -delete || true
@@ -57,6 +62,8 @@ RUN find dist/lib/ollama/rocm/rocblas/library -name "*gfx*" ! -name "*gfx1151*" 
 # ----------------------------------------------------------------------------
 FROM base-builder AS cpu-builder
 
+ARG PARALLEL
+
 # Install gcc-toolset-11 for CPU build compatibility
 RUN dnf install -y gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ \
     && dnf clean all
@@ -64,26 +71,27 @@ RUN dnf install -y gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ \
 ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
 
 RUN cmake --preset "CPU" \
-    && cmake --build --parallel 8 --preset "CPU" \
-    && cmake --install build --component CPU --strip --parallel 8
+    && cmake --build --parallel ${PARALLEL} --preset "CPU" \
+    && cmake --install build --component CPU --strip --parallel ${PARALLEL}
 
 # ----------------------------------------------------------------------------
 # Vulkan Builder Stage
 # ----------------------------------------------------------------------------
 FROM base-builder AS vulkan-builder
 
+ARG PARALLEL
 ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
 
 # Install Vulkan SDK
-ARG VULKAN_VERSION=1.4.303.1
-RUN curl -fsSL https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz | tar xJ -C /tmp \
-    && cp -r /tmp/${VULKAN_VERSION}/x86_64/include/* /usr/local/include/ \
-    && cp -r /tmp/${VULKAN_VERSION}/x86_64/lib/* /usr/local/lib/ \
-    && rm -rf /tmp/${VULKAN_VERSION}
+ARG VULKANVERSION
+RUN curl -fsSL https://sdk.lunarg.com/sdk/download/${VULKANVERSION}/linux/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz | tar xJ -C /tmp \
+    && cp -r /tmp/${VULKANVERSION}/x86_64/include/* /usr/local/include/ \
+    && cp -r /tmp/${VULKANVERSION}/x86_64/lib/* /usr/local/lib/ \
+    && rm -rf /tmp/${VULKANVERSION}
 
 RUN cmake --preset "Vulkan" \
-    && cmake --build --parallel 8 --preset "Vulkan" \
-    && cmake --install build --component Vulkan --strip --parallel 8
+    && cmake --build --parallel ${PARALLEL} --preset "Vulkan" \
+    && cmake --install build --component Vulkan --strip --parallel ${PARALLEL}
 
 
 # ----------------------------------------------------------------------------
