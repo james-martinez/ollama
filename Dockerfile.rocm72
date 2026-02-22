@@ -1,0 +1,67 @@
+# vim: filetype=dockerfile
+
+ARG ROCM_VERSION=7.2
+FROM rocm/dev-almalinux-8:${ROCM_VERSION}-complete AS builder
+
+# Install build dependencies
+RUN yum install -y yum-utils \
+    && yum-config-manager --add-repo https://dl.rockylinux.org/vault/rocky/8.5/AppStream/\$basearch/os/ \
+    && rpm --import https://dl.rockylinux.org/pub/rocky/RPM-GPG-KEY-Rocky-8 \
+    && dnf install -y gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ gcc-toolset-10-binutils git \
+    && dnf clean all
+
+ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
+
+# Install CMake 3.31.2
+ARG CMAKE_VERSION=3.31.2
+RUN curl -fsSL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-$(uname -m).tar.gz | tar xz -C /usr/local --strip-components 1
+
+# Install Go
+WORKDIR /go/src/github.com/ollama/ollama
+COPY go.mod go.sum ./
+RUN curl -fsSL https://golang.org/dl/go$(awk '/^go/ { print $2 }' go.mod).linux-amd64.tar.gz | tar xz -C /usr/local
+ENV PATH=/usr/local/go/bin:$PATH
+
+COPY . .
+
+# Build Ollama binary
+ENV CGO_ENABLED=1
+RUN go mod download
+RUN go build -trimpath -buildmode=pie -o /bin/ollama .
+
+# Build ROCm runner targeting gfx1151
+# We override AMDGPU_TARGETS to only build for gfx1151.
+RUN cmake --preset "ROCm 6" \
+    -DAMDGPU_TARGETS="gfx1151" \
+    -DCMAKE_HIP_FLAGS="-parallel-jobs=4" \
+    && cmake --build --parallel 8 --preset "ROCm 6" \
+    && cmake --install build --component HIP --strip --parallel 8
+
+# Prune rocblas library to keep only gfx1151
+# Search for files containing "gfx" (indicating architecture specific files)
+# and delete those that do NOT match "gfx1151".
+RUN find dist/lib/ollama/rocm/rocblas/library -name "*gfx*" ! -name "*gfx1151*" -delete || true
+
+# Final stage
+FROM public.ecr.aws/docker/library/ubuntu:24.04
+
+# Install runtime dependencies
+# libvulkan1 and libopenblas0 are generally useful for inference or fallbacks.
+RUN apt-get update && apt-get install -y ca-certificates libgomp1 libvulkan1 libopenblas0 && rm -rf /var/lib/apt/lists/*
+
+# Copy binary
+COPY --from=builder /bin/ollama /usr/bin/ollama
+
+# Copy libraries
+# The install step puts runner and libs in dist/lib/ollama/rocm
+COPY --from=builder /go/src/github.com/ollama/ollama/dist/lib/ollama /usr/lib/ollama
+
+# Set environment variables
+ENV OLLAMA_HOST=0.0.0.0:11434
+# For ROCm, the loader needs to find the libraries.
+ENV LD_LIBRARY_PATH=/usr/lib/ollama/rocm
+ENV PATH=/usr/bin:$PATH
+
+EXPOSE 11434
+ENTRYPOINT ["/usr/bin/ollama"]
+CMD ["serve"]
