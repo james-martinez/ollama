@@ -87,6 +87,7 @@ ARG VULKANVERSION
 RUN curl -fsSL https://sdk.lunarg.com/sdk/download/${VULKANVERSION}/linux/vulkansdk-linux-x86_64-${VULKANVERSION}.tar.xz | tar xJ -C /tmp \
     && cp -r /tmp/${VULKANVERSION}/x86_64/include/* /usr/local/include/ \
     && cp -r /tmp/${VULKANVERSION}/x86_64/lib/* /usr/local/lib/ \
+    && cp -r /tmp/${VULKANVERSION}/x86_64/bin/* /usr/local/bin/ \
     && rm -rf /tmp/${VULKANVERSION}
 
 RUN cmake --preset "Vulkan" \
