@@ -42,6 +42,24 @@ RUN cmake --preset "ROCm 7" \
 # and delete those that do NOT match "gfx1151".
 RUN find dist/lib/ollama/rocm/rocblas/library -name "*gfx*" ! -name "*gfx1151*" -delete || true
 
+# Build CPU runner
+RUN cmake --preset "CPU" \
+    && cmake --build --parallel 8 --preset "CPU" \
+    && cmake --install build --component CPU --strip --parallel 8
+
+# Build Vulkan runner
+# Install Vulkan SDK
+ARG VULKAN_VERSION=1.3.268.0
+RUN curl -fsSL https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz | tar xJ -C /tmp \
+    && cp -r /tmp/${VULKAN_VERSION}/x86_64/include/* /usr/local/include/ \
+    && cp -r /tmp/${VULKAN_VERSION}/x86_64/lib/* /usr/local/lib/ \
+    && rm -rf /tmp/${VULKAN_VERSION}
+
+RUN cmake --preset "Vulkan" \
+    && cmake --build --parallel 8 --preset "Vulkan" \
+    && cmake --install build --component Vulkan --strip --parallel 8
+
+
 # Final stage
 FROM public.ecr.aws/docker/library/ubuntu:24.04
 
