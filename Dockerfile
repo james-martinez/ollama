@@ -1,9 +1,9 @@
 # vim: filetype=dockerfile
 
 ARG FLAVOR=${TARGETARCH}
-ARG PARALLEL=8
+ARG PARALLEL=16
 
-ARG ROCMVERSION=6.3.3
+ARG ROCMVERSION=7.2
 ARG JETPACK5VERSION=r35.4.1
 ARG JETPACK6VERSION=r36.4.0
 ARG CMAKEVERSION=3.31.2
@@ -90,16 +90,17 @@ RUN --mount=type=cache,target=/root/.ccache \
         && cmake --install build --component CUDA --strip --parallel ${PARALLEL}
 
 
-FROM base AS rocm-6
+FROM base AS rocm-build
 ENV PATH=/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/bin:/opt/rocm/hcc/bin:$PATH
 ARG PARALLEL
 COPY CMakeLists.txt CMakePresets.json .
 COPY ml/backend/ggml/ggml ml/backend/ggml/ggml
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake --preset 'ROCm 6' \
-        && cmake --build --parallel ${PARALLEL} --preset 'ROCm 6' \
+    cmake --preset 'ROCm 7' \
+        -DAMDGPU_TARGETS="gfx1151" \
+        && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
         && cmake --install build --component HIP --strip --parallel ${PARALLEL}
-RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
+RUN find dist/lib/ollama/rocm/rocblas/library -name "*gfx*" ! -name "*gfx1151*" -delete || true
 
 FROM --platform=linux/arm64 nvcr.io/nvidia/l4t-jetpack:${JETPACK5VERSION} AS jetpack-5
 ARG CMAKEVERSION
@@ -191,7 +192,7 @@ COPY --from=jetpack-5 dist/lib/ollama/ /lib/ollama/
 COPY --from=jetpack-6 dist/lib/ollama/ /lib/ollama/
 
 FROM scratch AS rocm
-COPY --from=rocm-6 dist/lib/ollama /lib/ollama
+COPY --from=rocm-build dist/lib/ollama /lib/ollama
 
 FROM ${FLAVOR} AS archive
 ARG VULKANVERSION
@@ -200,10 +201,12 @@ COPY --from=build /bin/ollama /bin/ollama
 
 FROM ubuntu:24.04
 RUN apt-get update \
-    && apt-get install -y ca-certificates libvulkan1 libopenblas0 \
+    && apt-get install -y ca-certificates libvulkan1 libopenblas0 libnuma1 libelf1 libdrm2 libdrm-amdgpu1 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=archive /bin /usr/bin
+COPY --from=rocm-build /opt/rocm/bin/rocminfo /usr/bin/rocminfo
+COPY --from=rocm-build /opt/rocm/bin/rocm-smi /usr/bin/rocm-smi
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=archive /lib/ollama /usr/lib/ollama
 ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
