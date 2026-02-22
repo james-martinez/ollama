@@ -1,0 +1,126 @@
+# Dockerfile.rocm_nightly
+# Builds Ollama with ROCm nightly build from TheRock (GitHub main branch)
+
+ARG ROCM_VERSION=7.2
+ARG BASE_IMAGE=rocm/dev-almalinux-8:${ROCM_VERSION}-complete
+
+# -------------------------------------------------------------------------
+# Builder stage: Build ROCm from source using TheRock
+# -------------------------------------------------------------------------
+FROM ${BASE_IMAGE} AS therock-builder
+
+# Install dependencies required by TheRock build system
+# Mapping Ubuntu dependencies to AlmaLinux 8
+RUN dnf install -y \
+    git \
+    python39 \
+    python39-devel \
+    python39-pip \
+    ninja-build \
+    gcc-toolset-11 \
+    gcc-toolset-11-gcc-gfortran \
+    patchelf \
+    automake \
+    libtool \
+    libdrm-devel \
+    mesa-libEGL-devel \
+    texinfo \
+    bison \
+    flex \
+    vim-common \
+    openssl-devel \
+    libffi-devel \
+    wget \
+    && dnf clean all
+
+# Enable GCC 11 environment for subsequent commands
+ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+
+# Install CMake 3.31.2 (same as main Dockerfile)
+ARG CMAKEVERSION=3.31.2
+RUN curl -fsSL https://github.com/Kitware/CMake/releases/download/v${CMAKEVERSION}/cmake-${CMAKEVERSION}-linux-$(uname -m).tar.gz | tar xz -C /usr/local --strip-components 1
+
+# Setup Python 3.9 as python3
+RUN alternatives --set python3 /usr/bin/python3.9 || ln -sf /usr/bin/python3.9 /usr/bin/python3
+RUN pip3 install --upgrade pip
+
+# Clone TheRock (main branch)
+WORKDIR /therock
+RUN git clone https://github.com/ROCm/TheRock.git .
+
+# Fetch sources and apply patches
+RUN pip3 install -r requirements.txt
+RUN python3 ./build_tools/fetch_sources.py
+
+# Build ROCm from source
+# Targetting gfx1151 as requested
+# Using a custom install prefix to isolate this build
+ARG ROCM_INSTALL_DIR=/opt/rocm-nightly
+RUN cmake -B build -GNinja . \
+    -DTHEROCK_AMDGPU_TARGETS=gfx1151 \
+    -DCMAKE_INSTALL_PREFIX=${ROCM_INSTALL_DIR} \
+    -DTHEROCK_ENABLE_ALL=OFF \
+    -DTHEROCK_ENABLE_CORE_RUNTIME=ON \
+    -DTHEROCK_ENABLE_HIP_RUNTIME=ON \
+    -DTHEROCK_ENABLE_BLAS=ON \
+    -DTHEROCK_ENABLE_SOLVER=ON \
+    -DTHEROCK_ENABLE_SPARSE=ON \
+    -DTHEROCK_ENABLE_COMPILER=ON \
+    -DTHEROCK_ENABLE_ROCM_SMI=ON
+
+RUN cmake --build build
+RUN cmake --install build
+
+# -------------------------------------------------------------------------
+# Ollama Builder stage
+# -------------------------------------------------------------------------
+FROM therock-builder AS ollama-builder
+
+WORKDIR /go/src/github.com/ollama/ollama
+
+# Install Go
+COPY go.mod go.sum .
+RUN curl -fsSL https://golang.org/dl/go$(awk '/^go/ { print $2 }' go.mod).linux-$(case $(uname -m) in x86_64) echo amd64 ;; aarch64) echo arm64 ;; esac).tar.gz | tar xz -C /usr/local
+ENV PATH=/usr/local/go/bin:$PATH
+RUN go mod download
+
+COPY . .
+
+# Environment variables for ROCm
+ENV ROCM_PATH=/opt/rocm-nightly
+ENV HIP_PATH=/opt/rocm-nightly
+ENV CMAKE_PREFIX_PATH=/opt/rocm-nightly
+
+# Build Ollama libraries using ROCm 7 preset
+ARG PARALLEL=16
+RUN --mount=type=cache,target=/root/.ccache \
+    cmake --preset 'ROCm 7' \
+    && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
+    && cmake --install build --component HIP --strip --parallel ${PARALLEL}
+
+# Build Ollama binary
+ARG GOFLAGS="'-ldflags=-w -s'"
+ENV CGO_ENABLED=1
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -buildmode=pie -o /bin/ollama .
+
+# -------------------------------------------------------------------------
+# Final Runtime Image
+# -------------------------------------------------------------------------
+FROM ubuntu:24.04
+
+# Copy libraries (from cmake install)
+COPY --from=ollama-builder /go/src/github.com/ollama/ollama/dist/lib/ollama /lib/ollama
+# Copy binary (from go build)
+COPY --from=ollama-builder /bin/ollama /bin/ollama
+
+# Install runtime deps
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV OLLAMA_HOST=0.0.0.0:11434
+EXPOSE 11434
+ENTRYPOINT ["/bin/ollama"]
+CMD ["serve"]
