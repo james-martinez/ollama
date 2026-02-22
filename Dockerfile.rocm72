@@ -31,10 +31,10 @@ RUN go build -trimpath -buildmode=pie -o /bin/ollama .
 
 # Build ROCm runner targeting gfx1151
 # We override AMDGPU_TARGETS to only build for gfx1151.
-RUN cmake --preset "ROCm 6" \
+RUN cmake --preset "ROCm 7" \
     -DAMDGPU_TARGETS="gfx1151" \
     -DCMAKE_HIP_FLAGS="-parallel-jobs=4" \
-    && cmake --build --parallel 8 --preset "ROCm 6" \
+    && cmake --build --parallel 8 --preset "ROCm 7" \
     && cmake --install build --component HIP --strip --parallel 8
 
 # Prune rocblas library to keep only gfx1151
