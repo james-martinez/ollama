@@ -1,7 +1,12 @@
 # vim: filetype=dockerfile
 
 ARG ROCM_VERSION=7.2
-FROM rocm/dev-almalinux-8:${ROCM_VERSION}-complete AS builder
+ARG CMAKE_VERSION=3.31.2
+
+# ----------------------------------------------------------------------------
+# Base builder with CMake and Go
+# ----------------------------------------------------------------------------
+FROM rocm/dev-almalinux-8:${ROCM_VERSION}-complete AS base-builder
 
 # Install build dependencies
 RUN yum install -y yum-utils \
@@ -10,10 +15,8 @@ RUN yum install -y yum-utils \
     && dnf install -y gcc-toolset-10-gcc gcc-toolset-10-gcc-c++ gcc-toolset-10-binutils git \
     && dnf clean all
 
-ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
-
-# Install CMake 3.31.2
-ARG CMAKE_VERSION=3.31.2
+# Install CMake
+ARG CMAKE_VERSION
 RUN curl -fsSL https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-$(uname -m).tar.gz | tar xz -C /usr/local --strip-components 1
 
 # Install Go
@@ -29,6 +32,13 @@ ENV CGO_ENABLED=1
 RUN go mod download
 RUN go build -trimpath -buildmode=pie -o /bin/ollama .
 
+# ----------------------------------------------------------------------------
+# ROCm Builder Stage
+# ----------------------------------------------------------------------------
+FROM base-builder AS rocm-builder
+
+ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
+
 # Build ROCm runner targeting gfx1151
 # We override AMDGPU_TARGETS to only build for gfx1151.
 RUN cmake --preset "ROCm 7" \
@@ -38,16 +48,32 @@ RUN cmake --preset "ROCm 7" \
     && cmake --install build --component HIP --strip --parallel 8
 
 # Prune rocblas library to keep only gfx1151
-# Search for files containing "gfx" (indicating architecture specific files)
-# and delete those that do NOT match "gfx1151".
 RUN find dist/lib/ollama/rocm/rocblas/library -name "*gfx*" ! -name "*gfx1151*" -delete || true
 
-# Build CPU runner
+# ----------------------------------------------------------------------------
+# CPU Builder Stage (using clean environment if possible, or same base)
+# Note: The original Dockerfile uses `gcc-toolset-11` for CPU builds.
+# We will install gcc-toolset-11 here.
+# ----------------------------------------------------------------------------
+FROM base-builder AS cpu-builder
+
+# Install gcc-toolset-11 for CPU build compatibility
+RUN dnf install -y gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ \
+    && dnf clean all
+
+ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
+
 RUN cmake --preset "CPU" \
     && cmake --build --parallel 8 --preset "CPU" \
     && cmake --install build --component CPU --strip --parallel 8
 
-# Build Vulkan runner
+# ----------------------------------------------------------------------------
+# Vulkan Builder Stage
+# ----------------------------------------------------------------------------
+FROM base-builder AS vulkan-builder
+
+ENV PATH=/opt/rh/gcc-toolset-10/root/usr/bin:$PATH
+
 # Install Vulkan SDK
 ARG VULKAN_VERSION=1.3.268.0
 RUN curl -fsSL https://sdk.lunarg.com/sdk/download/${VULKAN_VERSION}/linux/vulkansdk-linux-x86_64-${VULKAN_VERSION}.tar.xz | tar xJ -C /tmp \
@@ -60,7 +86,9 @@ RUN cmake --preset "Vulkan" \
     && cmake --install build --component Vulkan --strip --parallel 8
 
 
-# Final stage
+# ----------------------------------------------------------------------------
+# Final Stage
+# ----------------------------------------------------------------------------
 FROM public.ecr.aws/docker/library/ubuntu:24.04
 
 # Install runtime dependencies
@@ -69,15 +97,19 @@ FROM public.ecr.aws/docker/library/ubuntu:24.04
 RUN apt-get update && apt-get install -y ca-certificates libgomp1 libvulkan1 libopenblas0 libnuma1 libelf1 libdrm2 libdrm-amdgpu1 && rm -rf /var/lib/apt/lists/*
 
 # Copy binary
-COPY --from=builder /bin/ollama /usr/bin/ollama
+COPY --from=base-builder /bin/ollama /usr/bin/ollama
 
 # Copy ROCm tools for debugging and detection
-COPY --from=builder /opt/rocm/bin/rocminfo /usr/bin/rocminfo
-COPY --from=builder /opt/rocm/bin/rocm-smi /usr/bin/rocm-smi
+COPY --from=rocm-builder /opt/rocm/bin/rocminfo /usr/bin/rocminfo
+COPY --from=rocm-builder /opt/rocm/bin/rocm-smi /usr/bin/rocm-smi
 
 # Copy libraries
-# The install step puts runner and libs in dist/lib/ollama/rocm
-COPY --from=builder /go/src/github.com/ollama/ollama/dist/lib/ollama /usr/lib/ollama
+# ROCm
+COPY --from=rocm-builder /go/src/github.com/ollama/ollama/dist/lib/ollama /usr/lib/ollama
+# CPU
+COPY --from=cpu-builder /go/src/github.com/ollama/ollama/dist/lib/ollama /usr/lib/ollama
+# Vulkan
+COPY --from=vulkan-builder /go/src/github.com/ollama/ollama/dist/lib/ollama /usr/lib/ollama
 
 # Set environment variables
 ENV OLLAMA_HOST=0.0.0.0:11434
