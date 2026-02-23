@@ -100,11 +100,6 @@ RUN --mount=type=cache,target=/root/.ccache \
         && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
         && cmake --install build --component HIP --strip --parallel ${PARALLEL}
 RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
-RUN cd dist/lib/ollama/rocm && \
-    ln -s libamdhip64.so.7 libamdhip64.so.6 && \
-    ln -s libhipblas.so.3 libhipblas.so.2 && \
-    ln -s librocblas.so.5 librocblas.so.4 && \
-    ln -s libhipblaslt.so.1 libhipblaslt.so.0
 
 FROM --platform=linux/arm64 nvcr.io/nvidia/l4t-jetpack:${JETPACK5VERSION} AS jetpack-5
 ARG CMAKEVERSION
