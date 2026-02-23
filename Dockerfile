@@ -180,7 +180,7 @@ FROM --platform=linux/amd64 scratch AS amd64
 # COPY --from=cuda-11 dist/lib/ollama/ /lib/ollama/
 COPY --from=cuda-12 dist/lib/ollama /lib/ollama/
 COPY --from=cuda-13 dist/lib/ollama /lib/ollama/
-COPY --from=rocm-7  dist/lib/ollama /lib/ollama/
+COPY --from=rocm-7  dist/lib/ollama /lib/ollama
 COPY --from=rocm-7  /opt/rocm/bin/rocminfo /bin/rocminfo
 COPY --from=rocm-7  /opt/rocm/bin/rocm-smi /bin/rocm-smi
 COPY --from=vulkan  dist/lib/ollama  /lib/ollama/
@@ -209,7 +209,7 @@ RUN apt-get update \
 COPY --from=archive /bin /usr/bin
 ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 COPY --from=archive /lib/ollama /usr/lib/ollama
-ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/lib/ollama/rocm
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV OLLAMA_HOST=0.0.0.0:11434
