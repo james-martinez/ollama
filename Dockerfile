@@ -181,6 +181,8 @@ FROM --platform=linux/amd64 scratch AS amd64
 COPY --from=cuda-12 dist/lib/ollama /lib/ollama/
 COPY --from=cuda-13 dist/lib/ollama /lib/ollama/
 COPY --from=rocm-7  dist/lib/ollama /lib/ollama/
+COPY --from=rocm-7  /opt/rocm/bin/rocminfo /bin/rocminfo
+COPY --from=rocm-7  /opt/rocm/bin/rocm-smi /bin/rocm-smi
 COPY --from=vulkan  dist/lib/ollama  /lib/ollama/
 COPY --from=mlx     /go/src/github.com/ollama/ollama/dist/lib/ollama /lib/ollama/
 
