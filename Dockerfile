@@ -99,8 +99,6 @@ RUN --mount=type=cache,target=/root/.ccache \
     cmake --preset 'ROCm 7' \
         && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
         && cmake --install build --component HIP --strip --parallel ${PARALLEL}
-RUN cp /opt/rocm/lib/libroctx64.so* dist/lib/ollama/rocm/ \
-    && cp /opt/rocm/lib/librocroller.so* dist/lib/ollama/rocm/
 RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
 
 FROM --platform=linux/arm64 nvcr.io/nvidia/l4t-jetpack:${JETPACK5VERSION} AS jetpack-5
