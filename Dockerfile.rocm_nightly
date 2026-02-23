@@ -110,6 +110,8 @@ RUN --mount=type=cache,target=/root/.cache/go-build \
 FROM ubuntu:24.04
 
 # Copy libraries (from cmake install)
+# Ollama on Linux expects libraries in ../lib/ollama relative to executable
+# Executable is in /bin/ollama, so libs should be in /lib/ollama (which is ../lib/ollama relative to /bin/ollama)
 COPY --from=ollama-builder /go/src/github.com/ollama/ollama/dist/lib/ollama /lib/ollama
 # Copy binary (from go build)
 COPY --from=ollama-builder /bin/ollama /bin/ollama
