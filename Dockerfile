@@ -96,13 +96,11 @@ ARG PARALLEL
 COPY CMakeLists.txt CMakePresets.json .
 COPY ml/backend/ggml/ggml ml/backend/ggml/ggml
 RUN --mount=type=cache,target=/root/.ccache \
-    cmake -B build \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DGGML_HIP=ON \
-        -DAMDGPU_TARGETS="gfx1151" \
-        -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
+    cmake --preset 'ROCm 7' \
+        -DGPU_TARGETS="gfx1151" \
         -DGGML_HIP_UMA=ON \
-        && cmake --build build --parallel ${PARALLEL} \
+        -DCMAKE_HIP_FLAGS="-mllvm --amdgpu-unroll-threshold-local=600" \
+        && cmake --build --parallel ${PARALLEL} --preset 'ROCm 7' \
         && cmake --install build --component HIP --strip --parallel ${PARALLEL}
 RUN rm -f dist/lib/ollama/rocm/rocblas/library/*gfx90[06]*
 
