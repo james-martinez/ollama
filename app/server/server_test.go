@@ -263,7 +263,7 @@ time=2025-07-01T19:33:43.163Z level=INFO source=routes.go:1721 msg="vram-based d
 			log: `time=2025-07-01T19:36:13.315Z level=INFO source=amd_linux.go:386 msg="amdgpu is supported" gpu=GPU-9abb57639fa80c50 gpu_type=gfx1030
 		releasing cuda driver library
 		time=2025-07-01T19:36:13.315Z level=INFO source=types.go:130 msg="inference compute" id=GPU-d6de3398-9932-6902-11ec-fee8e424c8a2 library=cuda variant=v12 compute=7.5 driver=12.8 name="NVIDIA GeForce RTX 2080 Ti" total="10.6 GiB" available="10.4 GiB"
-		time=2025-07-01T19:36:13.315Z level=INFO source=types.go:130 msg="inference compute" id=GPU-9abb57639fa80c50 library=rocm variant="" compute=gfx1030 driver=6.3 name=1002:73bf total="16.0 GiB" available="1.3 GiB"
+		time=2025-07-01T19:36:13.315Z level=INFO source=types.go:130 msg="inference compute" id=GPU-9abb57639fa80c50 library=rocm_v7 variant="" compute=gfx1030 driver=7.2 name=1002:73bf total="16.0 GiB" available="1.3 GiB"
 		time=2025-07-01T19:36:13.316Z level=INFO source=routes.go:1721 msg="vram-based default context" total_vram="26.6 GiB" default_num_ctx=32768
 		[GIN] 2025/07/01 - 18:00:09 | 200 |      50.263µs | 100.126.204.152 | HEAD     "/"
 		`,
@@ -277,9 +277,9 @@ time=2025-07-01T19:33:43.163Z level=INFO source=routes.go:1721 msg="vram-based d
 					VRAM:    "10.6 GiB",
 				},
 				{
-					Library: "rocm",
+					Library: "rocm_v7",
 					Compute: "gfx1030",
-					Driver:  "6.3",
+					Driver:  "7.2",
 					Name:    "1002:73bf",
 					VRAM:    "16.0 GiB",
 				},
