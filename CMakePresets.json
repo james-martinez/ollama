@@ -1,182 +1,95 @@
 {
-  "version": 3,
+  "version": 4,
   "configurePresets": [
     {
-      "name": "Default",
-      "binaryDir": "${sourceDir}/build",
-      "installDir": "${sourceDir}/dist",
-      "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded"
-      }
+        "name":  "base",
+        "hidden": true,
+        "generator":   "Ninja",
+        "binaryDir":   "${sourceDir}/build-${presetName}",
+        "cacheVariables": {
+            "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+            "CMAKE_INSTALL_RPATH": "$ORIGIN;$ORIGIN/.."
+        }
     },
     {
-      "name": "CPU",
-      "inherits": [ "Default" ]
+        "name": "sycl-base",
+        "hidden": true,
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build-${presetName}",
+        "cacheVariables": {
+            "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+            "CMAKE_CXX_COMPILER": "icx",
+            "CMAKE_C_COMPILER": "cl",
+            "GGML_SYCL": "ON",
+            "CMAKE_INSTALL_RPATH": "$ORIGIN;$ORIGIN/.."
+        }
+    },
+    { "name": "debug",    "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "release",  "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" } },
+    { "name": "reldbg",   "hidden": true, "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" } },
+    { "name": "static",   "hidden": true, "cacheVariables": { "GGML_STATIC":      "ON" } },
+    { "name": "sycl_f16", "hidden": true, "cacheVariables": { "GGML_SYCL_F16":    "ON" } },
+    { "name": "vulkan",   "hidden": true, "cacheVariables": { "GGML_VULKAN":      "ON" } },
+
+    {
+        "name": "x64-windows-llvm", "hidden": true,
+        "cacheVariables": {
+            "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/x64-windows-llvm.cmake"
+        }
+    },
+
+    {
+        "name": "arm64-windows-llvm", "hidden": true,
+        "architecture": { "value": "arm64",    "strategy": "external" },
+        "toolset":      { "value": "host=x64", "strategy": "external" },
+        "cacheVariables": {
+            "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm64-windows-llvm.cmake"
+        }
+    },
+
+    {
+        "name": "arm64-apple-clang", "hidden": true,
+        "architecture": { "value": "arm64",    "strategy": "external" },
+        "toolset":      { "value": "host=x64", "strategy": "external" },
+        "cacheVariables": {
+            "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/arm64-apple-clang.cmake"
+        }
     },
     {
-      "name": "CUDA",
-      "inherits": [ "Default" ]
+        "name": "x64-linux-gcc", "hidden": true,
+        "cacheVariables": {
+            "CMAKE_C_COMPILER": "gcc",
+            "CMAKE_CXX_COMPILER": "g++"
+        }
     },
-    {
-      "name": "CUDA 11",
-      "inherits": [ "CUDA" ],
-      "cacheVariables": {
-        "CMAKE_CUDA_ARCHITECTURES": "50-virtual;60-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-virtual;87-virtual;89-virtual;90-virtual",
-        "CMAKE_CUDA_FLAGS": "-Wno-deprecated-gpu-targets -t 2",
-        "OLLAMA_RUNNER_DIR": "cuda_v11"
-      }
-    },
-    {
-      "name": "CUDA 12",
-      "inherits": [ "CUDA" ],
-      "cacheVariables": {
-        "CMAKE_CUDA_ARCHITECTURES": "50;52;60;61;70;75;80;86;89;90;90a;120",
-        "CMAKE_CUDA_FLAGS": "-Wno-deprecated-gpu-targets -t 2",
-        "OLLAMA_RUNNER_DIR": "cuda_v12"
-      }
-    },
-    {
-      "name": "CUDA 13",
-      "inherits": [ "CUDA" ],
-      "cacheVariables": {
-        "CMAKE_CUDA_ARCHITECTURES": "75-virtual;80-virtual;86-virtual;87-virtual;89-virtual;90-virtual;90a-virtual;100-virtual;103-virtual;110-virtual;120-virtual;121-virtual",
-        "CMAKE_CUDA_FLAGS": "-t 4",
-        "OLLAMA_RUNNER_DIR": "cuda_v13"
-      }
-    },
-    {
-      "name": "JetPack 5",
-      "inherits": [ "CUDA" ],
-      "cacheVariables": {
-        "CMAKE_CUDA_ARCHITECTURES": "72;87",
-        "OLLAMA_RUNNER_DIR": "cuda_jetpack5"
-      }
-    },
-    {
-      "name": "JetPack 6",
-      "inherits": [ "CUDA" ],
-      "cacheVariables": {
-        "CMAKE_CUDA_ARCHITECTURES": "87",
-        "OLLAMA_RUNNER_DIR": "cuda_jetpack6"
-      }
-    },
-    {
-      "name": "ROCm",
-      "inherits": [ "Default" ],
-      "cacheVariables": {
-        "CMAKE_HIP_PLATFORM": "amd"
-      }
-    },
-    {
-      "name": "ROCm 6",
-      "inherits": [ "ROCm" ],
-      "cacheVariables": {
-        "CMAKE_HIP_FLAGS": "-parallel-jobs=4",
-        "AMDGPU_TARGETS": "gfx940;gfx941;gfx942;gfx1010;gfx1012;gfx1030;gfx1100;gfx1101;gfx1102;gfx1151;gfx1200;gfx1201;gfx908:xnack-;gfx90a:xnack+;gfx90a:xnack-",
-        "OLLAMA_RUNNER_DIR": "rocm"
-      }
-    },
-    {
-      "name": "Vulkan",
-      "inherits": [ "Default" ],
-      "cacheVariables": {
-        "OLLAMA_RUNNER_DIR": "vulkan"
-      }
-    },
-    {
-      "name": "MLX",
-      "inherits": [ "Default" ],
-      "cacheVariables": {
-        "MLX_ENGINE": "ON",
-        "OLLAMA_RUNNER_DIR": "mlx"
-      }
-    },
-    {
-      "name": "MLX CUDA 12",
-      "inherits": [ "MLX", "CUDA 12" ],
-      "cacheVariables": {
-        "OLLAMA_RUNNER_DIR": "mlx_cuda_v12"
-      }
-    },
-    {
-      "name": "MLX CUDA 13",
-      "inherits": [ "MLX", "CUDA 13" ],
-      "cacheVariables": {
-        "OLLAMA_RUNNER_DIR": "mlx_cuda_v13"
-      }
-    }
-  ],
-  "buildPresets": [
-    {
-      "name": "Default",
-      "configurePreset": "Default",
-      "configuration": "Release"
-    },
-    {
-      "name": "CPU",
-      "configurePreset": "Default",
-      "targets": [ "ggml-cpu" ]
-    },
-    {
-      "name": "CUDA",
-      "configurePreset": "CUDA",
-      "targets": [ "ggml-cuda" ]
-    },
-    {
-      "name": "CUDA 11",
-      "inherits": [ "CUDA" ],
-      "configurePreset": "CUDA 11"
-    },
-    {
-      "name": "CUDA 12",
-      "inherits": [ "CUDA" ],
-      "configurePreset": "CUDA 12"
-    },
-    {
-      "name": "CUDA 13",
-      "inherits": [ "CUDA" ],
-      "configurePreset": "CUDA 13"
-    },
-    {
-      "name": "JetPack 5",
-      "inherits": [ "CUDA" ],
-      "configurePreset": "JetPack 5"
-    },
-    {
-      "name": "JetPack 6",
-      "inherits": [ "CUDA" ],
-      "configurePreset": "JetPack 6"
-    },
-    {
-      "name": "ROCm",
-      "configurePreset": "ROCm",
-      "targets": [ "ggml-hip" ]
-    },
-    {
-      "name": "ROCm 6",
-      "inherits": [ "ROCm" ],
-      "configurePreset": "ROCm 6"
-    },
-    {
-      "name": "Vulkan",
-      "targets": [ "ggml-vulkan" ],
-      "configurePreset": "Vulkan"
-    },
-    {
-      "name": "MLX",
-      "targets": [ "mlx", "mlxc" ],
-      "configurePreset": "MLX"
-    },
-    {
-      "name": "MLX CUDA 12",
-      "targets": [ "mlx", "mlxc" ],
-      "configurePreset": "MLX CUDA 12"
-    },
-    {
-      "name": "MLX CUDA 13",
-      "targets": [ "mlx", "mlxc" ],
-      "configurePreset": "MLX CUDA 13"
-    }
+    { "name": "x64-linux-gcc-debug", "inherits": [ "base", "x64-linux-gcc", "debug" ] },
+    { "name": "x64-linux-gcc-release", "inherits": [ "base", "x64-linux-gcc", "release" ] },
+    { "name": "x64-linux-gcc-reldbg", "inherits": [ "base", "x64-linux-gcc", "reldbg" ] },
+    { "name": "x64-linux-gcc+static-release", "inherits": [ "base", "x64-linux-gcc", "release", "static" ] },
+
+    { "name": "arm64-windows-llvm-debug", "inherits": [ "base", "arm64-windows-llvm", "debug" ] },
+    { "name": "arm64-windows-llvm-release", "inherits": [ "base", "arm64-windows-llvm", "reldbg" ] },
+    { "name": "arm64-windows-llvm+static-release", "inherits": [ "base", "arm64-windows-llvm", "reldbg", "static" ] },
+
+    { "name": "arm64-apple-clang-debug", "inherits": [ "base", "arm64-apple-clang", "debug" ] },
+    { "name": "arm64-apple-clang-release", "inherits": [ "base", "arm64-apple-clang", "reldbg" ] },
+    { "name": "arm64-apple-clang+static-release", "inherits": [ "base", "arm64-apple-clang",  "reldbg", "static" ] },
+
+    { "name": "x64-windows-llvm-debug", "inherits": [ "base", "x64-windows-llvm", "debug" ] },
+    { "name": "x64-windows-llvm-release", "inherits": [ "base", "x64-windows-llvm", "release" ] },
+    { "name": "x64-windows-llvm-reldbg", "inherits": [ "base", "x64-windows-llvm", "reldbg" ] },
+    { "name": "x64-windows-llvm+static-release", "inherits": [ "base", "x64-windows-llvm", "reldbg", "static" ] },
+
+    { "name": "x64-windows-msvc-debug", "inherits": [ "base", "debug" ] },
+    { "name": "x64-windows-msvc-release", "inherits": [ "base", "reldbg" ] },
+    { "name": "x64-windows-msvc+static-release", "inherits": [ "base", "reldbg", "static" ] },
+
+    { "name": "x64-windows-sycl-debug", "inherits": [ "sycl-base", "debug" ] },
+    { "name": "x64-windows-sycl-debug-f16", "inherits": [ "sycl-base", "debug", "sycl_f16" ] },
+    { "name": "x64-windows-sycl-release", "inherits": [ "sycl-base", "release" ] },
+    { "name": "x64-windows-sycl-release-f16", "inherits": [ "sycl-base", "release", "sycl_f16" ] },
+
+    { "name": "x64-windows-vulkan-debug", "inherits": [ "base", "vulkan", "debug" ] },
+    { "name": "x64-windows-vulkan-release", "inherits": [ "base", "vulkan", "release" ] }
   ]
 }

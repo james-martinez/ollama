@@ -1,219 +1,285 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.14...3.28) # for add_link_options and implicit target directories.
+project("llama.cpp" C CXX)
+include(CheckIncludeFileCXX)
 
-project(Ollama C CXX)
+#set(CMAKE_WARN_DEPRECATED YES)
+set(CMAKE_WARN_UNUSED_CLI YES)
 
-# Handle cross-compilation on macOS: when CMAKE_OSX_ARCHITECTURES is set to a
-# single architecture different from the host, override CMAKE_SYSTEM_PROCESSOR
-# to match. This is necessary because CMAKE_SYSTEM_PROCESSOR defaults to the
-# host architecture, but downstream projects (like MLX) use it to detect the
-# target architecture.
-if(CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES MATCHES ";")
-    # Single architecture specified
-    if(CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64" AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
-        message(STATUS "Cross-compiling for x86_64: overriding CMAKE_SYSTEM_PROCESSOR from ${CMAKE_SYSTEM_PROCESSOR} to x86_64")
-        set(CMAKE_SYSTEM_PROCESSOR "x86_64")
-    elseif(CMAKE_OSX_ARCHITECTURES STREQUAL "arm64" AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-        message(STATUS "Cross-compiling for arm64: overriding CMAKE_SYSTEM_PROCESSOR from ${CMAKE_SYSTEM_PROCESSOR} to arm64")
-        set(CMAKE_SYSTEM_PROCESSOR "arm64")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+if (NOT XCODE AND NOT MSVC AND NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
+endif()
+
+message("CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+
+# Add path to modules
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/")
+
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(LLAMA_STANDALONE ON)
+
+    include(git-vars)
+
+    # configure project version
+    # TODO
+else()
+    set(LLAMA_STANDALONE OFF)
+endif()
+
+option(LLAMA_USE_SYSTEM_GGML "Use system libggml" OFF)
+
+option(LLAMA_WASM_MEM64 "llama: use 64-bit memory in WASM builds" ON)
+
+if (EMSCRIPTEN)
+    set(BUILD_SHARED_LIBS_DEFAULT OFF)
+
+    # Use 64-bit memory to support backend_get_memory queries
+    # TODO: analyze performance impact, see https://spidermonkey.dev/blog/2025/01/15/is-memory64-actually-worth-using
+    if (LLAMA_WASM_MEM64)
+      add_compile_options("-sMEMORY64=1")
+      add_link_options("-sMEMORY64=1")
+    endif()
+    add_link_options("-sALLOW_MEMORY_GROWTH=1")
+
+    option(LLAMA_WASM_SINGLE_FILE "llama: embed WASM inside the generated llama.js" OFF)
+    option(LLAMA_BUILD_HTML "llama: build HTML file" ON)
+    if (LLAMA_BUILD_HTML)
+        set(CMAKE_EXECUTABLE_SUFFIX ".html")
+    endif()
+else()
+    if (MINGW)
+        set(BUILD_SHARED_LIBS_DEFAULT OFF)
+    else()
+        set(BUILD_SHARED_LIBS_DEFAULT ON)
     endif()
 endif()
 
-include(CheckLanguage)
+option(BUILD_SHARED_LIBS "build shared libraries" ${BUILD_SHARED_LIBS_DEFAULT})
+
+if (WIN32)
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+endif()
+
+if (MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:C>:/utf-8>")
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
+    add_compile_options("$<$<COMPILE_LANGUAGE:C>:/bigobj>")
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/bigobj>")
+endif()
+
+if (LLAMA_STANDALONE)
+    # enable parallel builds for msbuild
+    list(APPEND CMAKE_VS_GLOBALS UseMultiToolTask=true)
+    list(APPEND CMAKE_VS_GLOBALS EnforceProcessCountAcrossBuilds=true)
+endif()
+
+if (CMAKE_SYSTEM_NAME STREQUAL "iOS")
+    set(LLAMA_TOOLS_INSTALL_DEFAULT OFF)
+else()
+    set(LLAMA_TOOLS_INSTALL_DEFAULT ${LLAMA_STANDALONE})
+endif()
+
+#
+# option list
+#
+
+# debug
+option(LLAMA_ALL_WARNINGS           "llama: enable all compiler warnings"                   ON)
+option(LLAMA_ALL_WARNINGS_3RD_PARTY "llama: enable all compiler warnings in 3rd party libs" OFF)
+
+# build
+option(LLAMA_FATAL_WARNINGS "llama: enable -Werror flag" OFF)
+
+# sanitizers
+option(LLAMA_SANITIZE_THREAD    "llama: enable thread sanitizer"    OFF)
+option(LLAMA_SANITIZE_ADDRESS   "llama: enable address sanitizer"   OFF)
+option(LLAMA_SANITIZE_UNDEFINED "llama: enable undefined sanitizer" OFF)
+
+# utils
+option(LLAMA_BUILD_COMMON "llama: build common utils library" ${LLAMA_STANDALONE})
+
+# extra artifacts
+option(LLAMA_BUILD_TESTS    "llama: build tests"          ${LLAMA_STANDALONE})
+option(LLAMA_BUILD_TOOLS    "llama: build tools"          ${LLAMA_STANDALONE})
+option(LLAMA_BUILD_EXAMPLES "llama: build examples"       ${LLAMA_STANDALONE})
+option(LLAMA_BUILD_SERVER   "llama: build server example" ${LLAMA_STANDALONE})
+option(LLAMA_TOOLS_INSTALL  "llama: install tools"        ${LLAMA_TOOLS_INSTALL_DEFAULT})
+option(LLAMA_TESTS_INSTALL  "llama: install tests"        ON)
+
+# 3rd party libs
+option(LLAMA_OPENSSL    "llama: use openssl to support HTTPS" ON)
+option(LLAMA_LLGUIDANCE "llama-common: include LLGuidance library for structured output in common utils" OFF)
+
+
+# Required for relocatable CMake package
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/build-info.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/common.cmake)
+
+if (NOT DEFINED LLAMA_BUILD_NUMBER)
+    set(LLAMA_BUILD_NUMBER        ${BUILD_NUMBER})
+endif()
+if (NOT DEFINED LLAMA_BUILD_COMMIT)
+    set(LLAMA_BUILD_COMMIT        ${BUILD_COMMIT})
+endif()
+set(LLAMA_INSTALL_VERSION 0.0.${LLAMA_BUILD_NUMBER})
+
+# override ggml options
+set(GGML_ALL_WARNINGS   ${LLAMA_ALL_WARNINGS})
+set(GGML_FATAL_WARNINGS ${LLAMA_FATAL_WARNINGS})
+
+# change the default for these ggml options
+if (NOT DEFINED GGML_LLAMAFILE)
+    set(GGML_LLAMAFILE_DEFAULT ON)
+endif()
+
+if (NOT DEFINED GGML_CUDA_GRAPHS)
+    set(GGML_CUDA_GRAPHS_DEFAULT ON)
+endif()
+
+# transition helpers
+function (llama_option_depr TYPE OLD)
+    if (${OLD})
+        set(NEW "${ARGV2}")
+        if(NEW)
+            message(${TYPE} "${OLD} is deprecated, use ${NEW} instead")
+            set(${NEW} ON PARENT_SCOPE)
+        else()
+            message(${TYPE} "${OLD} is deprecated and will be ignored")
+        endif()
+    endif()
+endfunction()
+
+llama_option_depr(FATAL_ERROR LLAMA_CUBLAS              GGML_CUDA)
+llama_option_depr(WARNING     LLAMA_CUDA                GGML_CUDA)
+llama_option_depr(WARNING     LLAMA_METAL               GGML_METAL)
+llama_option_depr(WARNING     LLAMA_METAL_EMBED_LIBRARY GGML_METAL_EMBED_LIBRARY)
+llama_option_depr(WARNING     LLAMA_NATIVE              GGML_NATIVE)
+llama_option_depr(WARNING     LLAMA_RPC                 GGML_RPC)
+llama_option_depr(WARNING     LLAMA_SYCL                GGML_SYCL)
+llama_option_depr(WARNING     LLAMA_SYCL_F16            GGML_SYCL_F16)
+llama_option_depr(WARNING     LLAMA_CANN                GGML_CANN)
+llama_option_depr(WARNING     LLAMA_CURL)
+
+include("cmake/license.cmake")
+license_add_file("llama.cpp" "LICENSE")
+
+#
+# 3rd-party
+#
+
+if (LLAMA_USE_SYSTEM_GGML)
+    message(STATUS "Using system-provided libggml, skipping ggml build")
+    find_package(ggml REQUIRED)
+    add_library(ggml ALIAS ggml::ggml)
+endif()
+
+if (NOT TARGET ggml AND NOT LLAMA_USE_SYSTEM_GGML)
+    set(GGML_BUILD_NUMBER ${LLAMA_BUILD_NUMBER})
+    set(GGML_BUILD_COMMIT ${LLAMA_BUILD_COMMIT})
+    add_subdirectory(ggml)
+    # ... otherwise assume ggml is added by a parent CMakeLists.txt
+endif()
+
+#
+# build the library
+#
+
+add_subdirectory(src)
+
+#
+# utils, programs, examples and tests
+#
+
+if (LLAMA_BUILD_COMMON)
+    add_subdirectory(common)
+    add_subdirectory(vendor/cpp-httplib)
+endif()
+
+if (LLAMA_BUILD_COMMON AND LLAMA_BUILD_TESTS AND NOT CMAKE_JS_VERSION)
+    include(CTest)
+    add_subdirectory(tests)
+endif()
+
+if (LLAMA_BUILD_COMMON AND LLAMA_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+    add_subdirectory(pocs)
+endif()
+
+if (LLAMA_BUILD_COMMON AND LLAMA_BUILD_TOOLS)
+    add_subdirectory(tools)
+endif()
+
+# Automatically add all files from the 'licenses' directory
+file(GLOB EXTRA_LICENSES "${CMAKE_SOURCE_DIR}/licenses/LICENSE-*")
+
+foreach(FILE_PATH ${EXTRA_LICENSES})
+    get_filename_component(FILE_NAME "${FILE_PATH}" NAME)
+    string(REGEX REPLACE "^LICENSE-" "" NAME "${FILE_NAME}")
+    license_add_file("${NAME}" "${FILE_PATH}")
+endforeach()
+
+if (LLAMA_BUILD_COMMON)
+    license_generate(common)
+endif()
+
+#
+# install
+#
+
 include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
-find_package(Threads REQUIRED)
+set(LLAMA_INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR} CACHE PATH "Location of header  files")
+set(LLAMA_LIB_INSTALL_DIR     ${CMAKE_INSTALL_LIBDIR}     CACHE PATH "Location of library files")
+set(LLAMA_BIN_INSTALL_DIR     ${CMAKE_INSTALL_BINDIR}     CACHE PATH "Location of binary  files")
 
-set(CMAKE_BUILD_TYPE Release)
-set(BUILD_SHARED_LIBS ON)
+set(LLAMA_PUBLIC_HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/llama.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/llama-cpp.h)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS ON) # Recent versions of MLX Requires gnu++17 extensions to compile properly
+set_target_properties(llama
+    PROPERTIES
+        PUBLIC_HEADER "${LLAMA_PUBLIC_HEADERS}")
 
-set(GGML_BUILD ON)
-set(GGML_SHARED ON)
-set(GGML_CCACHE ON)
-set(GGML_BACKEND_DL ON)
-set(GGML_BACKEND_SHARED ON)
-set(GGML_SCHED_MAX_COPIES 4)
+install(TARGETS llama LIBRARY PUBLIC_HEADER)
 
-set(GGML_LLAMAFILE ON)
-set(GGML_CUDA_PEER_MAX_BATCH_SIZE 128)
-set(GGML_CUDA_GRAPHS ON)
-set(GGML_CUDA_FA ON)
-set(GGML_CUDA_COMPRESSION_MODE default)
+configure_package_config_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/llama-config.cmake.in
+        ${CMAKE_CURRENT_BINARY_DIR}/llama-config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/llama
+    PATH_VARS LLAMA_INCLUDE_INSTALL_DIR
+              LLAMA_LIB_INSTALL_DIR
+              LLAMA_BIN_INSTALL_DIR )
 
-if((CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
-    OR (NOT CMAKE_OSX_ARCHITECTURES AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm|aarch64|ARM64|ARMv[0-9]+"))
-    set(GGML_CPU_ALL_VARIANTS ON)
-endif()
+write_basic_package_version_file(
+        ${CMAKE_CURRENT_BINARY_DIR}/llama-version.cmake
+    VERSION ${LLAMA_INSTALL_VERSION}
+    COMPATIBILITY SameMajorVersion)
 
-if(APPLE)
-    set(CMAKE_BUILD_RPATH "@loader_path")
-    set(CMAKE_INSTALL_RPATH "@loader_path")
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH ON)
-endif()
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/llama-config.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/llama-version.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/llama)
 
-set(OLLAMA_BUILD_DIR ${CMAKE_BINARY_DIR}/lib/ollama)
-set(OLLAMA_INSTALL_DIR ${CMAKE_INSTALL_PREFIX}/lib/ollama/${OLLAMA_RUNNER_DIR})
+install(
+    FILES convert_hf_to_gguf.py
+    PERMISSIONS
+        OWNER_READ
+        OWNER_WRITE
+        OWNER_EXECUTE
+        GROUP_READ
+        GROUP_EXECUTE
+        WORLD_READ
+        WORLD_EXECUTE
+    DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY         ${OLLAMA_BUILD_DIR})
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_DEBUG   ${OLLAMA_BUILD_DIR})
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELEASE ${OLLAMA_BUILD_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY         ${OLLAMA_BUILD_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_DEBUG   ${OLLAMA_BUILD_DIR})
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_RELEASE ${OLLAMA_BUILD_DIR})
+configure_file(cmake/llama.pc.in
+        "${CMAKE_CURRENT_BINARY_DIR}/llama.pc"
+        @ONLY)
 
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src/ggml-cpu)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src/ggml-cpu/amx)
-
-add_compile_definitions(NDEBUG GGML_VERSION=0x0 GGML_COMMIT=0x0)
-
-# Define GGML version variables for shared library SOVERSION
-# These are required by ggml/src/CMakeLists.txt for proper library versioning
-set(GGML_VERSION_MAJOR 0)
-set(GGML_VERSION_MINOR 0)
-set(GGML_VERSION_PATCH 0)
-set(GGML_VERSION "${GGML_VERSION_MAJOR}.${GGML_VERSION_MINOR}.${GGML_VERSION_PATCH}")
-
-set(GGML_CPU ON)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src)
-set_property(TARGET ggml PROPERTY EXCLUDE_FROM_ALL TRUE)
-
-get_target_property(CPU_VARIANTS ggml-cpu MANUALLY_ADDED_DEPENDENCIES)
-if(NOT CPU_VARIANTS)
-    set(CPU_VARIANTS "ggml-cpu")
-endif()
-
-install(TARGETS ggml-base ${CPU_VARIANTS}
-    RUNTIME_DEPENDENCIES
-        PRE_EXCLUDE_REGEXES ".*"
-    RUNTIME DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT CPU
-    LIBRARY DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT CPU
-    FRAMEWORK DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT CPU
-)
-
-check_language(CUDA)
-if(CMAKE_CUDA_COMPILER)
-    if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.24" AND NOT CMAKE_CUDA_ARCHITECTURES)
-        set(CMAKE_CUDA_ARCHITECTURES "native")
-    endif()
-
-    find_package(CUDAToolkit)
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src/ggml-cuda)
-    install(TARGETS ggml-cuda
-        RUNTIME_DEPENDENCIES
-            DIRECTORIES ${CUDAToolkit_BIN_DIR} ${CUDAToolkit_BIN_DIR}/x64 ${CUDAToolkit_LIBRARY_DIR}
-            PRE_INCLUDE_REGEXES cublas cublasLt cudart
-            PRE_EXCLUDE_REGEXES ".*"
-        RUNTIME DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT CUDA
-        LIBRARY DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT CUDA
-    )
-endif()
-
-set(WINDOWS_AMDGPU_TARGETS_EXCLUDE_REGEX "^gfx(908|90a|1200|1201):xnack[+-]$"
-    CACHE STRING
-    "Regular expression describing AMDGPU_TARGETS not supported on Windows. Override to force building these targets. Default \"^gfx(908|90a|1200|1201):xnack[+-]$\"."
-)
-
-check_language(HIP)
-if(CMAKE_HIP_COMPILER)
-    set(HIP_PLATFORM "amd")
-
-    if(NOT AMDGPU_TARGETS)
-        find_package(hip REQUIRED)
-        list(FILTER AMDGPU_TARGETS INCLUDE REGEX "^gfx(94[012]|101[02]|1030|110[012]|120[01])$")
-    endif()
-
-    if(WIN32 AND WINDOWS_AMDGPU_TARGETS_EXCLUDE_REGEX)
-        list(FILTER AMDGPU_TARGETS EXCLUDE REGEX ${WINDOWS_AMDGPU_TARGETS_EXCLUDE_REGEX})
-    endif()
-
-    if(AMDGPU_TARGETS)
-        find_package(hip REQUIRED)
-        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src/ggml-hip)
-
-        if (WIN32)
-            target_compile_definitions(ggml-hip PRIVATE GGML_CUDA_NO_PEER_COPY)
-        endif()
-
-        target_compile_definitions(ggml-hip PRIVATE GGML_HIP_NO_VMM)
-
-        install(TARGETS ggml-hip
-            RUNTIME_DEPENDENCY_SET rocm
-            RUNTIME DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT HIP
-            LIBRARY DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT HIP
-        )
-        install(RUNTIME_DEPENDENCY_SET rocm
-                DIRECTORIES ${HIP_BIN_INSTALL_DIR} ${HIP_LIB_INSTALL_DIR}
-                PRE_INCLUDE_REGEXES hipblas rocblas amdhip64 rocsolver amd_comgr hsa-runtime64 rocsparse tinfo rocprofiler-register drm drm_amdgpu numa elf
-                PRE_EXCLUDE_REGEXES ".*"
-                POST_EXCLUDE_REGEXES "system32"
-            RUNTIME DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT HIP
-            LIBRARY DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT HIP
-        )
-
-        foreach(HIP_LIB_BIN_INSTALL_DIR IN ITEMS ${HIP_BIN_INSTALL_DIR} ${HIP_LIB_INSTALL_DIR})
-            if(EXISTS ${HIP_LIB_BIN_INSTALL_DIR}/rocblas)
-                install(DIRECTORY ${HIP_LIB_BIN_INSTALL_DIR}/rocblas DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT HIP)
-                break()
-            endif()
-        endforeach()
-    endif()
-endif()
-
-if(NOT APPLE)
-    find_package(Vulkan)
-    if(Vulkan_FOUND)
-        add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/ml/backend/ggml/ggml/src/ggml-vulkan)
-        install(TARGETS ggml-vulkan
-            RUNTIME_DEPENDENCIES
-                PRE_INCLUDE_REGEXES vulkan
-                PRE_EXCLUDE_REGEXES ".*"
-            RUNTIME DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT Vulkan
-            LIBRARY DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT Vulkan
-        )
-    endif()
-endif()
-
-option(MLX_ENGINE "Enable MLX backend" OFF)
-
-if(MLX_ENGINE)
-    message(STATUS "Setting up MLX (this takes a while...)")
-    add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/x/imagegen/mlx)
-
-    # Find CUDA toolkit if MLX is built with CUDA support
-    find_package(CUDAToolkit)
-
-    install(TARGETS mlx mlxc
-        RUNTIME_DEPENDENCIES
-            DIRECTORIES ${CUDAToolkit_BIN_DIR} ${CUDAToolkit_BIN_DIR}/x64 ${CUDAToolkit_LIBRARY_DIR}
-            PRE_INCLUDE_REGEXES cublas cublasLt cudart nvrtc nvrtc-builtins cudnn nccl openblas gfortran
-            PRE_EXCLUDE_REGEXES ".*"
-        RUNTIME DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT MLX
-        LIBRARY DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT MLX
-        FRAMEWORK DESTINATION ${OLLAMA_INSTALL_DIR} COMPONENT MLX
-    )
-
-    # Install the Metal library for macOS arm64 (must be colocated with the binary)
-    # Metal backend is only built for arm64, not x86_64
-    if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
-        install(FILES ${CMAKE_BINARY_DIR}/_deps/mlx-build/mlx/backend/metal/kernels/mlx.metallib
-            DESTINATION ${OLLAMA_INSTALL_DIR}
-            COMPONENT MLX)
-    endif()
-
-    # Manually install cudart and cublas since they might not be picked up as direct dependencies
-    if(CUDAToolkit_FOUND)
-        file(GLOB CUDART_LIBS
-            "${CUDAToolkit_LIBRARY_DIR}/libcudart.so*"
-            "${CUDAToolkit_LIBRARY_DIR}/libcublas.so*")
-        if(CUDART_LIBS)
-            install(FILES ${CUDART_LIBS}
-                DESTINATION ${OLLAMA_INSTALL_DIR}
-                COMPONENT MLX)
-        endif()
-    endif()
-endif()
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/llama.pc"
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
